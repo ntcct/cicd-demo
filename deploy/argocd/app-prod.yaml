@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cicd-demo-prod
+  namespace: argocd
+spec:
+  project: cicd-demo
+  source:
+    repoURL: https://github.com/ntcct/cicd-demo.git
+    targetRevision: main
+    path: deploy/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  # PROD: NO automated sync. A human must click "Sync" in ArgoCD (or run
+  # `argocd app sync cicd-demo-prod`). This models change control: nothing
+  # reaches prod without a deliberate, auditable decision.
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

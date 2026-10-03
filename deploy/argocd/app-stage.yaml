@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cicd-demo-stage
+  namespace: argocd
+spec:
+  project: cicd-demo
+  source:
+    repoURL: https://github.com/ntcct/cicd-demo.git
+    targetRevision: main
+    path: deploy/overlays/stage
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: stage
+  # STAGE: auto-sync, but the stage overlay's image tag only moves after a
+  # deliberate promotion of a dev-validated image. Prod-faithful config/scale.
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

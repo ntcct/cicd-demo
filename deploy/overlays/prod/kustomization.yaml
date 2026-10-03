@@ -1,0 +1,59 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: prod
+
+# Prod serves the exact image that passed through stage. The tag only advances
+# here after a deliberate, approved promotion (manual ArgoCD sync — see README).
+resources:
+  - ../../base
+  - ingress.yaml
+  - pdb.yaml
+
+images:
+  - name: ghcr.io/ntcct/cicd-demo
+    newTag: sha-000000000000 # bumped by a deliberate prod-promotion step
+
+replicas:
+  - name: cicd-demo
+    count: 3
+
+patches:
+  - target:
+      kind: Deployment
+      name: cicd-demo
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: APP_ENV
+          value: prod
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: APP_VERSION
+          value: prod
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: LOG_LEVEL
+          value: warn
+      # Tighter prod resource limits.
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: 250m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 256Mi
+      # Spread replicas across nodes where possible (best-effort on single-node Kind).
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app: cicd-demo
+                  topologyKey: kubernetes.io/hostname

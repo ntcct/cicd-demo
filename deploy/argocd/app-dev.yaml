@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cicd-demo-dev
+  namespace: argocd
+spec:
+  project: cicd-demo
+  source:
+    repoURL: https://github.com/ntcct/cicd-demo.git
+    targetRevision: main
+    path: deploy/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+  # DEV: fully automated. Every merge to main lands here within seconds.
+  # Fast feedback; breakage is cheap and expected.
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

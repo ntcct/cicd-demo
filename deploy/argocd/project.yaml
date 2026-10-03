@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: cicd-demo
+  namespace: argocd
+spec:
+  description: CI/CD demo project — RBAC/source boundary for the three environments.
+  sourceRepos:
+    - https://github.com/ntcct/cicd-demo.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: dev
+    - server: https://kubernetes.default.svc
+      namespace: stage
+    - server: https://kubernetes.default.svc
+      namespace: prod
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

@@ -1,0 +1,129 @@
+name: ci
+
+# CI builds and publishes an immutable image, then (on main) promotes it to the
+# dev overlay by committing the new image tag back into this repo. ArgoCD watches
+# the overlays and deploys. CI never touches the cluster directly — that boundary
+# (CI builds, CD deploys) is the core GitOps principle this demo teaches.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: write        # needed to commit the dev image-tag bump
+  packages: write        # needed to push to GHCR
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}   # ghcr.io/ntcct/cicd-demo
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ".[dev]"
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ".[dev]"
+      - name: Run tests with coverage
+        run: |
+          coverage run -m pytest
+          coverage report
+
+  build-scan-publish:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag (immutable = git SHA)
+        id: meta
+        run: echo "sha=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (load locally for scanning)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha }}
+
+      - name: Scan image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha }}
+          format: table
+          exit-code: "1"             # fail the build on findings
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      # Publish only happens on main — PRs build+scan but do not publish/promote.
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha }}
+
+  promote-dev:
+    # Promotion to dev is automatic on main: GitOps source of truth gets the new
+    # tag, ArgoCD auto-syncs dev. Stage/prod promotions are deliberate (see README).
+    needs: build-scan-publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump dev overlay image tag
+        env:
+          TAG: ${{ needs.build-scan-publish.outputs.image_tag }}
+        run: |
+          cd deploy/overlays/dev
+          # Record the newly built, scanned, published image tag.
+          sed -i "s/newTag:.*/newTag: ${TAG}/" kustomization.yaml
+          echo "Updated dev overlay to image tag: ${TAG}"
+          cat kustomization.yaml
+
+      - name: Commit and push the promotion
+        env:
+          TAG: ${{ needs.build-scan-publish.outputs.image_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/overlays/dev/kustomization.yaml
+          if git diff --cached --quiet; then
+            echo "No change to promote."
+          else
+            git commit -m "chore(dev): promote image ${TAG} [skip ci]"
+            git push
+          fi
