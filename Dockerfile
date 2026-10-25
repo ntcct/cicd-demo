@@ -14,10 +14,10 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY pyproject.toml ./
-# Install only runtime dependencies (not dev extras).
-RUN pip install --upgrade pip && pip install .
-
+# `pip install .` builds this project, so the package source must be present first.
 COPY app ./app
+# Install runtime dependencies only (no dev extras).
+RUN pip install --upgrade pip && pip install .
 
 # ---- Runtime stage: slim, non-root ----
 FROM python:3.11-slim AS runtime
