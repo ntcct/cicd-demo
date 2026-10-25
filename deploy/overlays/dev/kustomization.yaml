@@ -9,7 +9,7 @@ resources:
 
 images:
   - name: ghcr.io/ntcct/cicd-demo
-    newTag: sha-000000000000 # bumped automatically by CI promote-dev job
+    newTag: sha-154a00850fdc
 
 replicas:
   - name: cicd-demo
